@@ -1,0 +1,349 @@
+Option Explicit
+Dim WB As Workbook
+Dim M1 As Worksheet
+Dim T1 As Worksheet
+Dim C As Worksheet
+
+
+Sub StartCorrelation()
+Set WB = ActiveWorkbook
+Set M1 = WB.Sheets("Measurement1")
+Set T1 = WB.Sheets("Table1")
+Set C = WB.Sheets("Correlate")
+
+DeleteNamedRanges
+
+'activate the sheet with the assets you are correlating to find the last row and column
+Sheets("Measurement1").Select
+Dim StartTable As Range: Set StartTable = ActiveSheet.Cells
+
+Dim EndTable As Worksheet: Set EndTable = Sheets("Table1")
+Dim MoveRng As Range
+Dim TblRng As Range
+Dim rTabMove As Integer
+Dim cTabMove As Integer
+rTabMove = StartTable.Find(What:="*", After:=StartTable.Cells(1), Lookat:=xlPart, LookIn:=xlFormulas, SearchOrder:=xlByRows, SearchDirection:=xlPrevious, MatchCase:=False).Row
+cTabMove = StartTable.Find(What:="*", After:=StartTable.Cells(1), Lookat:=xlPart, LookIn:=xlFormulas, SearchOrder:=xlByColumns, SearchDirection:=xlPrevious, MatchCase:=False).Column
+
+'move the range to the table worksheet in order to interact with the graphs
+Set MoveRng = StartTable.Range(Cells(1, 2), Cells(rTabMove, cTabMove))
+MoveRng.Copy EndTable.Range("D2")
+
+    
+Application.CutCopyMode = False
+Application.ScreenUpdating = True
+
+'move the dates over to the table worksheet
+M1.Range("A:A").Copy T1.Range("C:C")
+Application.CutCopyMode = False
+T1.Range("C1").Insert Shift:=xlDown, CopyOrigin:=xlFormatFromLeftOrAbove
+
+'add the checkboxes to the table worksheet
+CheckBoxes
+CheckBoxDynamicTable
+
+'autofit the table worksheet
+EndTable.Columns.AutoFit
+
+'create range names of assets to be correlated
+NameTheAsset
+
+'create chart to see volatility over time
+AssetChart
+
+'create chart to see the total impact of each asset
+ColumnTotals
+
+'make charts same size and next to each other
+SortCharts
+
+'correlate named ranges and display on correlation sheet
+CorrelateAssets
+
+Range("e1").Select
+MsgBox "Green squares mean less correlated and Red Squares mean more correlated."
+End Sub
+Sub NameTheAsset()
+Dim NLastCol As Long, LastRo As Long
+M1.Select
+Dim i As Integer
+Dim xlerr As Error
+NLastCol = Cells.Find(What:="*", After:=[A1], SearchOrder:=xlByColumns, SearchDirection:=xlPrevious).Column
+LastRo = Cells(Rows.Count, 2).End(xlUp).Row
+
+'skip the date column and name each column by the text in the top row
+For i = 2 To NLastCol
+Dim myRANGE As Range: Set myRANGE = Range(Cells(2, i), Cells(LastRo, i))
+
+Range(Cells(2, i), Cells(LastRo, i)).Name = Cells(1, i).Text
+Next
+
+End Sub
+Sub CorrelateAssets()
+Set WB = ActiveWorkbook
+Set M1 = WB.Sheets("Measurement1")
+Set T1 = WB.Sheets("Table1")
+Set C = WB.Sheets("Correlate")
+'find the matrix data and correlate the names of each asset
+
+Dim RawData As Worksheet: Set RawData = M1
+RawData.Activate
+With RawData
+Dim MLastRow As Long, MLastColumn As Long
+MLastRow = RawData.Cells(Rows.Count, 2).End(xlUp).Row
+MLastColumn = RawData.Cells(2, Columns.Count).End(xlToLeft).Column
+
+
+
+Dim Matrix As Worksheet: Set Matrix = C
+Matrix.Cells.Clear
+
+
+'set up top and left symbols named ranges for correlated data to fill
+RawData.Range(Cells(1, 2), Cells(1, MLastColumn)).Copy Matrix.Range("E3")
+RawData.Range(Cells(1, 2), Cells(1, MLastColumn)).Select
+Selection.Copy
+Matrix.Select
+Range("D4").Select
+Selection.PasteSpecial Paste:=xlPasteAll, Operation:=xlNone, SkipBlanks:=False, Transpose:=True
+Application.CutCopyMode = False
+
+End With
+
+Matrix.Select
+
+With Matrix
+
+    Dim FirstRow As Long, FirstColumn As Long, LastRow As Long, lastColumn As Long
+
+    FirstRow = Cells.Find(What:="*", SearchDirection:=xlNext, SearchOrder:=xlByRows).Row + 1
+    FirstColumn = Cells.Find(What:="*", SearchDirection:=xlNext, SearchOrder:=xlByColumns).Column + 1
+    LastRow = Cells.Find(What:="*", SearchDirection:=xlPrevious, SearchOrder:=xlByRows).Row
+    lastColumn = Cells.Find(What:="*", SearchDirection:=xlPrevious, SearchOrder:=xlByColumns).Column
+
+End With
+'find the absolute value of the indirect correlation between the named ranges
+Dim MyUsedRange As Range: Set MyUsedRange = Range(Cells(FirstRow, FirstColumn), Cells(LastRow, lastColumn))
+MyUsedRange.FormulaR1C1 = "=ABS(CORREL(INDIRECT(RC4),INDIRECT(R3C)))"
+Calculate
+MyUsedRange.Select
+    Selection.FormatConditions.AddColorScale ColorScaleType:=3
+    Selection.FormatConditions(Selection.FormatConditions.Count).SetFirstPriority
+    Selection.FormatConditions(1).ColorScaleCriteria(1).Type = xlConditionValueLowestValue
+    With Selection.FormatConditions(1).ColorScaleCriteria(1).FormatColor
+        .Color = 8109667
+        .TintAndShade = 0
+    End With
+    Selection.FormatConditions(1).ColorScaleCriteria(2).Type = xlConditionValuePercentile
+    Selection.FormatConditions(1).ColorScaleCriteria(2).Value = 50
+    With Selection.FormatConditions(1).ColorScaleCriteria(2).FormatColor
+        .Color = 8711167
+        .TintAndShade = 0
+    End With
+    Selection.FormatConditions(1).ColorScaleCriteria(3).Type = _
+        xlConditionValueHighestValue
+    With Selection.FormatConditions(1).ColorScaleCriteria(3).FormatColor
+        .Color = 7039480
+        .TintAndShade = 0
+    End With
+
+    Range("A1").Select
+End Sub
+Sub AssetChart()
+Dim TargetChart As Worksheet: Set TargetChart = T1
+Dim AssetRng1 As Range
+Dim Assets As String
+Dim ch As ChartObject
+    For Each ch In C.ChartObjects
+        ch.Delete
+    Next
+TargetChart.Select
+    With TargetChart
+        Dim LRChar As Long, LCChar As Long
+        LRChar = Cells(Rows.Count, 3).End(xlUp).Row
+        LCChar = Cells(2, Columns.Count).End(xlToLeft).Column
+        Set AssetRng1 = TargetChart.Range(Cells(2, 3), Cells(LRChar, LCChar))
+        Assets = .Name
+    End With
+
+Dim Source As Range
+Set Source = AssetRng1
+Source.Select
+Dim AssetChart As Object
+Set AssetChart = TargetChart.Shapes.AddChart(xlLine).Chart
+    With AssetChart
+        .SetSourceData Source:=Source
+        .ChartType = xlLine
+        .HasTitle = True
+        .ChartTitle.Text = "Asset Performance"
+        .SetElement (msoElementPrimaryCategoryAxisTitleAdjacentToAxis)
+        .SetElement (msoElementPrimaryValueAxisTitleHorizontal)
+        .Axes(xlCategory).CategoryType = xlCategoryScale
+        .Axes(xlCategory, xlPrimary).AxisTitle.Text = "Time"
+        .Axes(xlCategory).ReversePlotOrder = True
+        .Axes(xlValue, xlPrimary).HasTitle = True
+        .Axes(xlValue, xlPrimary).AxisTitle.Characters.Text = "Change"
+        .HasLegend = True
+        .SetElement (msoElementLegendTop)
+        .PlotArea.Format.Fill.ForeColor.RGB = RGB(220, 230, 241)
+        .ChartArea.Format.Line.Visible = msoFalse
+        .Parent.Name = "Performance"
+    End With
+
+
+With AssetChart
+    .Location Where:=xlLocationAsObject, Name:="Correlate"
+End With
+End Sub
+Sub ColumnTotals()
+'
+' ColumnTotalsEmbeddedChart Macro
+' createColumnChart
+
+Dim GoofTotals As Worksheet: Set GoofTotals = T1
+Dim Dlt As Worksheet: Set Dlt = M1
+Dim NameTotals As Range
+Dim Time As String
+
+Dlt.Select
+
+With Dlt
+    Dim LRdlt As Long
+    LRdlt = Range("A" & Rows.Count).End(xlUp).Row
+End With
+
+GoofTotals.Select
+
+With GoofTotals
+    Dim TickerNames As Range, TickerTotals As Range
+    Dim TOTFR As Long, TOTFC As Long, TOTLR As Long, TOTLC As Long
+        TOTFR = Cells.Find(What:="*", SearchDirection:=xlNext, SearchOrder:=xlByRows).Row
+        TOTFC = Cells.Find(What:="*", SearchDirection:=xlNext, SearchOrder:=xlByColumns).Column + 2
+        TOTLR = Cells.Find(What:="*", SearchDirection:=xlPrevious, SearchOrder:=xlByRows).Row
+        TOTLC = Cells.Find(What:="*", SearchDirection:=xlPrevious, SearchOrder:=xlByColumns).Column
+
+        Set TickerNames = Range(Cells(TOTFR, TOTFC), Cells(TOTFR, TOTLC))
+        Set TickerTotals = Range(Cells(TOTLR, TOTFC), Cells(TOTLR, TOTLC))
+        
+        Set NameTotals = Union(TickerNames, TickerTotals)
+        
+        Time = .Name
+End With
+'
+'Set NameTotals = Range(TickerNames & TickerTotals)
+Dim ThisChart As Object
+Set ThisChart = GoofTotals.Shapes.AddChart(xlColumnClustered).Chart
+    
+    GoofTotals.Range("D2").Select
+With ThisChart
+    .SetSourceData Source:=NameTotals
+    .HasTitle = True
+    .ChartTitle.Text = "Overall Performance Change Totals from " & Dlt.Range("A" & LRdlt).Value & " to " & Dlt.Range("A2").Value
+    .SeriesCollection(1).Select
+        With Selection.Format.Shadow
+        .Visible = msoTrue
+        .Style = msoShadowStyleInnerShadow
+        .Blur = 5
+        .OffsetX = -2.8284271247
+        .OffsetY = -2.8284271247
+        .ForeColor.RGB = RGB(0, 0, 0)
+        .Transparency = 0.5
+        .Size = 0
+        End With
+    .Parent.Name = "Total"
+End With
+
+With ThisChart
+    .Location Where:=xlLocationAsObject, Name:="Correlate"
+End With
+
+Range("A11").Select
+End Sub
+Sub SortCharts()
+    Dim iChart As Long
+    Dim nCharts As Long
+    Dim dTop As Double
+    Dim dLeft As Double
+    Dim dHeight As Double
+    Dim dWidth As Double
+    Dim nColumns As Long
+
+    dTop = 300     ' top of first row of charts
+    dLeft = 0    ' left of first column of charts
+    dHeight = 300  ' height of all charts
+    dWidth = 450  ' width of all charts
+    nColumns = 10 ' number of columns of charts
+    nCharts = ActiveSheet.ChartObjects.Count
+
+    For iChart = 1 To nCharts
+        With ActiveSheet.ChartObjects(iChart)
+            .Height = dHeight
+            .Width = dWidth
+            .Top = dTop + Int((iChart - 1) / nColumns) * dHeight
+            .Left = dLeft + ((iChart - 1) Mod nColumns) * dWidth
+        End With
+    Next
+End Sub
+
+
+Sub DeleteNamedRanges()
+Application.ScreenUpdating = False
+'delete named ranges
+    Dim sName As Name
+        For Each sName In ThisWorkbook.Names
+            If InStr(1, sName, "Table") Then
+                sName.Delete
+            End If
+        Next
+
+End Sub
+Sub CheckBoxes()
+'clear out old check boxes
+
+M1.CheckBoxes.Delete
+T1.CheckBoxes.Delete
+
+T1.Select
+
+'Get number of stock symbols
+Dim LCcheckBox As Long
+LCcheckBox = Cells.Find(What:="*", SearchDirection:=xlPrevious, SearchOrder:=xlByColumns).Column - 3
+
+Dim i As Integer
+For i = 1 To LCcheckBox 'go down columns and add box
+
+ActiveSheet.CheckBoxes.Add(Cells(8, i + 3).Left, Cells(1, i).Top, 72, 17.25).Select
+'    sample
+    With Selection
+        .Caption = " "
+        .Value = xlOn '
+        .LinkedCell = "B" & i + 2
+        .Display3DShading = False
+      '  .Characters.Text = " " & Cells.Value & " "
+    End With
+Next i
+
+End Sub
+Sub CheckBoxDynamicTable()
+'add check box above named ranges in table1 worksheet
+Application.ScreenUpdating = False
+With T1
+    Dim MyFR As Long, MyFC As Long, MyLR As Long, MyLC As Long
+    MyFR = Cells.Find(What:="*", SearchDirection:=xlNext, SearchOrder:=xlByRows).Row + 1
+    MyFC = Cells.Find(What:="*", SearchDirection:=xlNext, SearchOrder:=xlByColumns).Column + 2
+    MyLR = Cells.Find(What:="*", SearchDirection:=xlPrevious, SearchOrder:=xlByRows).Row
+    MyLC = Cells.Find(What:="*", SearchDirection:=xlPrevious, SearchOrder:=xlByColumns).Column
+End With
+
+Dim MyUsedRange As Range: Set MyUsedRange = Range(Cells(MyFR, MyFC), Cells(MyLC, MyLC))
+
+Dim i As Integer
+
+For i = 4 To MyLC
+
+
+Range(Cells(MyFR, i), Cells(MyLR, i)).FormulaR1C1 = "=IF(R" & i - 1 & "C2,'Measurement1'!R[-1]C[-2],NA())"
+
+Next i
+Application.ScreenUpdating = True
+End Sub
