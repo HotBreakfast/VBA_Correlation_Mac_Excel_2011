@@ -4,7 +4,7 @@ Measurement1
 Table1
 Correlate
 
- Copy and paste a worksheet into the “Measurement1” worksheet in the following format:
+## Copy and paste a worksheet into the “Measurement1” worksheet in the following format:
 <P/>a.	Range A1 value must say “Date”</P>
 <P/>b.	Column A must have the dates</P>
 <P/>c.	Each column heading must have the name of the asset you are measuring</P>
